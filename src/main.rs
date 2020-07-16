@@ -1,10 +1,21 @@
 use actix::prelude::*;
 use std::collections::HashMap;
+use std::fmt;
 
-#[derive(Debug)]
+#[derive(Clone, Copy)]
 enum Action {
     COOPERATE,
     DEFECT,
+}
+
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            Action::COOPERATE => "Cooperate",
+            Action::DEFECT => "Defect",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
@@ -24,6 +35,19 @@ enum Payoff {
     SUCKER,
 }
 
+impl fmt::Display for Payoff {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            Payoff::NULL => "Null",
+            Payoff::REWARD => "Reward",
+            Payoff::PUNISHMENT => "Punishment",
+            Payoff::TEMPTATION => "Temptation",
+            Payoff::SUCKER => "Sucker",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 type PayoffValues = HashMap<Payoff, usize>;
 
 struct Interrogator {
@@ -41,35 +65,37 @@ impl Actor for Interrogator {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Context<Self>) {
-        // start heartbeats otherwise server will disconnect after 10 seconds
         self.interrogate(ctx);
     }
 }
 
 impl Interrogator {
-    fn interrogate(&mut self, ctx: &mut Context<Self>) {
-        let sequence = self.sequence;
-        self.sequence += 1;
-            
-        let prev_payoff = self.blue_payoff;
-        let prev_amount = self.blue_amount;
-        self.blue_addr.do_send(
-            Interrogate{
+    fn interrogate(&mut self, _ctx: &mut Context<Self>) {
+        loop {
+            let sequence = self.sequence;
+            self.sequence += 1;
+    
+            let prev_payoff = self.blue_payoff;
+            let prev_amount = self.blue_amount;
+            self.blue_addr.do_send(Interrogate {
                 sequence,
                 prev_payoff,
                 prev_amount,
-            }
-        );
+            });
+    
+            let prev_payoff = self.red_payoff;
+            let prev_amount = self.red_amount;
+            self.red_addr.do_send(Interrogate {
+                sequence,
+                prev_payoff,
+                prev_amount,
+            });
 
-        let prev_payoff = self.red_payoff;
-        let prev_amount = self.red_amount;
-        self.red_addr.do_send(
-            Interrogate{
-                sequence,
-                prev_payoff,
-                prev_amount,
+            if self.sequence >= self.iterations {
+                println!("completed {} iterations", self.sequence);
+                break;
             }
-        );
+        }
     }
 }
 
@@ -86,15 +112,24 @@ impl Message for Interrogate {
 impl Handler<Interrogate> for Prisoner {
     type Result = MessageResult<Interrogate>;
 
-    fn handle(&mut self, msg: Interrogate, ctx: &mut Context<Self>) -> Self::Result {
-        println!("{}: Interrogate received: sequence = {}", self.name, msg.sequence);
+    fn handle(&mut self, msg: Interrogate, _ctx: &mut Context<Self>) -> Self::Result {
+        let action = self.strategy.choose();
 
-        // TODO: use a strategy to pick an Action
-        MessageResult(Action::DEFECT)
+        println!(
+            "{}: Interrogate received: sequence = {}; prev payoff = {}, prev amount = {}, => action = {}",
+            self.name, msg.sequence, msg.prev_payoff, msg.prev_amount, action
+        );
+
+        MessageResult(action)
     }
 }
 
+trait Strategy {
+    fn choose(&mut self) -> Action;
+}
+
 struct Prisoner {
+    strategy: Box<dyn Strategy>,
     name: String,
 }
 
@@ -102,27 +137,28 @@ impl Actor for Prisoner {
     type Context = Context<Self>;
 }
 
-#[derive(Message)]
-#[rtype(result = "Action")]
-struct Deal {
-    iteration: usize,
-}
-
-
 fn main() {
     const ITERATIONS: usize = 10;
-    let mut Payoff_values: PayoffValues = HashMap::new();
-    Payoff_values.insert(Payoff::REWARD, 3);
-    Payoff_values.insert(Payoff::TEMPTATION, 4);
-    Payoff_values.insert(Payoff::PUNISHMENT, 2);
-    Payoff_values.insert(Payoff::SUCKER, 1);
+    let mut payoff_values: PayoffValues = HashMap::new();
+    payoff_values.insert(Payoff::REWARD, 3);
+    payoff_values.insert(Payoff::TEMPTATION, 4);
+    payoff_values.insert(Payoff::PUNISHMENT, 2);
+    payoff_values.insert(Payoff::SUCKER, 1);
 
     let system = System::new("prisoners-dilemma");
 
     let execution = async {
-        let blue_addr = Prisoner{name: "blue".to_owned()}.start();
-        let red_addr = Prisoner{name: "red".to_owned()}.start();
-        let _interrogator_addr = Interrogator{
+        let blue_addr = Prisoner {
+            name: "blue".to_owned(),
+            strategy: Box::new(Action::DEFECT),
+        }
+        .start();
+        let red_addr = Prisoner {
+            name: "red".to_owned(),
+            strategy: Box::new(Action::COOPERATE),
+        }
+        .start();
+        let _interrogator_addr = Interrogator {
             iterations: ITERATIONS,
             sequence: 0,
             blue_addr,
@@ -141,4 +177,10 @@ fn main() {
     System::current().stop();
 
     system.run().unwrap();
+}
+
+impl Strategy for Action {
+    fn choose(&mut self) -> Action {
+        *self
+    }
 }
