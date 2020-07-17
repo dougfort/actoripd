@@ -1,6 +1,7 @@
 use actix::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
+use log::debug;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -92,7 +93,7 @@ impl Interrogator {
             });
 
             if self.sequence >= self.iterations {
-                println!("completed {} iterations", self.sequence);
+                debug!("completed {} iterations", self.sequence);
                 break;
             }
         }
@@ -115,7 +116,7 @@ impl Handler<Interrogate> for Prisoner {
     fn handle(&mut self, msg: Interrogate, _ctx: &mut Context<Self>) -> Self::Result {
         let action = self.strategy.choose();
 
-        println!(
+        debug!(
             "{}: Interrogate received: sequence = {}; prev payoff = {}, prev amount = {}, => action = {}",
             self.name, msg.sequence, msg.prev_payoff, msg.prev_amount, action
         );
@@ -145,6 +146,9 @@ fn main() {
     payoff_values.insert(Payoff::PUNISHMENT, 2);
     payoff_values.insert(Payoff::SUCKER, 1);
 
+    std::env::set_var("RUST_LOG", "actoripd=debug,actix=info");
+    env_logger::init();
+    
     let system = System::new("prisoners-dilemma");
 
     let execution = async {
@@ -170,7 +174,7 @@ fn main() {
         }
         .start();
 
-        println!("Hello, world!");
+        debug!("Hello, world!");
     };
     Arbiter::spawn(execution);
 
