@@ -65,11 +65,12 @@ impl Handler<Interrogate> for Prisoner {
     type Result = MessageResult<Interrogate>;
 
     fn handle(&mut self, msg: Interrogate, _ctx: &mut Context<Self>) -> Self::Result {
+        self.score += msg.prev_amount;
         let action = self.strategy.choose();
 
         debug!(
-            "{}: Interrogate received: sequence = {}; prev payoff = {}, prev amount = {}, => action = {}",
-            self.name, msg.sequence, msg.prev_payoff, msg.prev_amount, action
+            "{}: Interrogate received: sequence = {}; prev payoff = {}, prev amount = {}, score = {} => action = {}",
+            self.name, msg.sequence, msg.prev_payoff, msg.prev_amount, self.score, action
         );
 
         MessageResult(action)
@@ -83,6 +84,7 @@ trait Strategy {
 struct Prisoner {
     strategy: Box<dyn Strategy>,
     name: String,
+    score: usize,
 }
 
 impl Actor for Prisoner {
@@ -107,11 +109,13 @@ fn main() {
         let blue_addr = Prisoner {
             name: "blue".to_owned(),
             strategy: Box::new(Action::DEFECT),
+            score: 0,
         }
         .start();
         let red_addr = Prisoner {
             name: "red".to_owned(),
             strategy: Box::new(Action::COOPERATE),
+            score: 0,
         }
         .start();
 
