@@ -1,7 +1,7 @@
 use actix::prelude::*;
+use log::debug;
 use std::collections::HashMap;
 use std::fmt;
-use log::debug;
 
 #[derive(Clone, Copy)]
 enum Action {
@@ -91,18 +91,19 @@ impl Actor for Prisoner {
 
 fn main() {
     const ITERATIONS: usize = 10;
-    let mut payoff_values: PayoffValues = HashMap::new();
-    payoff_values.insert(Payoff::REWARD, 3);
-    payoff_values.insert(Payoff::TEMPTATION, 4);
-    payoff_values.insert(Payoff::PUNISHMENT, 2);
-    payoff_values.insert(Payoff::SUCKER, 1);
 
     std::env::set_var("RUST_LOG", "actoripd=debug,actix=info");
     env_logger::init();
-    
+
     let system = System::new("prisoners-dilemma");
 
     let execution = async {
+        let mut payoff_values: PayoffValues = HashMap::new();
+        payoff_values.insert(Payoff::REWARD, 3);
+        payoff_values.insert(Payoff::TEMPTATION, 4);
+        payoff_values.insert(Payoff::PUNISHMENT, 2);
+        payoff_values.insert(Payoff::SUCKER, 1);
+
         let blue_addr = Prisoner {
             name: "blue".to_owned(),
             strategy: Box::new(Action::DEFECT),
@@ -115,41 +116,45 @@ fn main() {
         .start();
 
         let mut sequence = 0;
-        let blue_payoff = Payoff::NULL;
-        let blue_amount = 0;
-        let red_payoff = Payoff::NULL;
-        let red_amount = 0;
-        
+        let mut blue_payoff = Payoff::NULL;
+        let mut blue_amount = 0;
+        let mut red_payoff = Payoff::NULL;
+        let mut red_amount = 0;
+
         loop {
-            let blue_result  = blue_addr.send(Interrogate {
-                sequence,
-                prev_payoff: blue_payoff,
-                prev_amount: blue_amount,
-            }).await;
+            let blue_result = blue_addr
+                .send(Interrogate {
+                    sequence,
+                    prev_payoff: blue_payoff,
+                    prev_amount: blue_amount,
+                })
+                .await;
 
-            let red_result = red_addr.send(Interrogate {
-                sequence,
-                prev_payoff: red_payoff,
-                prev_amount: red_amount,
-            }).await;
+            let red_result = red_addr
+                .send(Interrogate {
+                    sequence,
+                    prev_payoff: red_payoff,
+                    prev_amount: red_amount,
+                })
+                .await;
 
-            match red_result {
-                Ok(action) => debug!("red action = {}", action),
-                Err(err) => debug!("red error = {}", err),
-            };
+            let red_action = red_result.unwrap();
+            let blue_action = blue_result.unwrap();
 
-            match blue_result {
-                Ok(action) => debug!("blue action = {}", action),
-                Err(err) => debug!("blue error = {}", err),
-            };
+            let payoff = compute_payoff(red_action, blue_action);
+
+            red_payoff = payoff.0;
+            red_amount = *payoff_values.get(&red_payoff).unwrap_or(&0);
+
+            blue_payoff = payoff.1;
+            blue_amount = *payoff_values.get(&blue_payoff).unwrap_or(&0);
 
             sequence += 1;
             if sequence >= ITERATIONS {
                 debug!("completed {} iterations", sequence);
                 break;
             }
-        };
-
+        }
     };
     Arbiter::spawn(execution);
 
@@ -161,5 +166,25 @@ fn main() {
 impl Strategy for Action {
     fn choose(&mut self) -> Action {
         *self
+    }
+}
+
+/// For payoff https://en.wikipedia.org/wiki/Prisoner's_dilemma
+///
+/// If both players cooperate, they both receive the reward R for cooperating.
+/// If both players defect, they both receive the punishment payoff P.
+/// If Blue defects while Red cooperates, then Blue receives the temptation payoff T, while Red receives the "sucker's" payoff, S.
+/// Similarly, if Blue cooperates while Red defects, then Blue receives the sucker's payoff S, while Red receives the temptation payoff T.
+///
+/// T > R > P > S
+/// We want 2R > T + S for the iterative game
+///
+
+fn compute_payoff(red: Action, blue: Action) -> (Payoff, Payoff) {
+    match (red, blue) {
+        (Action::COOPERATE, Action::COOPERATE) => (Payoff::REWARD, Payoff::REWARD),
+        (Action::DEFECT, Action::DEFECT) => (Payoff::PUNISHMENT, Payoff::PUNISHMENT),
+        (Action::DEFECT, Action::COOPERATE) => (Payoff::SUCKER, Payoff::TEMPTATION),
+        (Action::COOPERATE, Action::DEFECT) => (Payoff::TEMPTATION, Payoff::SUCKER),
     }
 }
