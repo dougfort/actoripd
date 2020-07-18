@@ -1,5 +1,7 @@
 use actix::prelude::*;
 use log::debug;
+use rand::thread_rng;
+use rand::Rng;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -89,10 +91,18 @@ struct Prisoner {
 
 impl Actor for Prisoner {
     type Context = Context<Self>;
-}
+
+    fn started(&mut self, _ctx: &mut Context<Self>) {
+        debug!("Actor {}: starts", self.name);
+    }
+ 
+    fn stopped(&mut self, _ctx: &mut Context<Self>) {
+        debug!("Actor {}: stops: final score: {}", self.name, self.score);
+    }
+ }
 
 fn main() {
-    const ITERATIONS: usize = 10;
+    const ITERATIONS: usize = 100;
 
     std::env::set_var("RUST_LOG", "actoripd=debug,actix=info");
     env_logger::init();
@@ -108,13 +118,13 @@ fn main() {
 
         let blue_addr = Prisoner {
             name: "blue".to_owned(),
-            strategy: Box::new(Action::DEFECT),
+            strategy: Box::new(RandomStrategy {}),
             score: 0,
         }
         .start();
         let red_addr = Prisoner {
             name: "red".to_owned(),
-            strategy: Box::new(Action::COOPERATE),
+            strategy: Box::new(RandomStrategy {}),
             score: 0,
         }
         .start();
@@ -159,10 +169,11 @@ fn main() {
                 break;
             }
         }
+
+        System::current().stop();
+
     };
     Arbiter::spawn(execution);
-
-    System::current().stop();
 
     system.run().unwrap();
 }
@@ -170,6 +181,19 @@ fn main() {
 impl Strategy for Action {
     fn choose(&mut self) -> Action {
         *self
+    }
+}
+
+struct RandomStrategy {}
+
+impl Strategy for RandomStrategy {
+    fn choose(&mut self) -> Action {
+        let action_number = thread_rng().gen::<u8>();
+        if action_number % 2 == 0 {
+            Action::COOPERATE
+        } else {
+            Action::DEFECT
+        }
     }
 }
 
