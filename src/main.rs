@@ -51,55 +51,6 @@ impl fmt::Display for Payoff {
 
 type PayoffValues = HashMap<Payoff, usize>;
 
-struct Interrogator {
-    iterations: usize,
-    sequence: usize,
-    blue_addr: Addr<Prisoner>,
-    blue_payoff: Payoff,
-    blue_amount: usize,
-    red_addr: Addr<Prisoner>,
-    red_payoff: Payoff,
-    red_amount: usize,
-}
-
-impl Actor for Interrogator {
-    type Context = Context<Self>;
-
-    fn started(&mut self, ctx: &mut Context<Self>) {
-        self.interrogate(ctx);
-    }
-}
-
-impl Interrogator {
-    fn interrogate(&mut self, _ctx: &mut Context<Self>) {
-        loop {
-            let sequence = self.sequence;
-            self.sequence += 1;
-    
-            let prev_payoff = self.blue_payoff;
-            let prev_amount = self.blue_amount;
-            self.blue_addr.do_send(Interrogate {
-                sequence,
-                prev_payoff,
-                prev_amount,
-            });
-    
-            let prev_payoff = self.red_payoff;
-            let prev_amount = self.red_amount;
-            self.red_addr.do_send(Interrogate {
-                sequence,
-                prev_payoff,
-                prev_amount,
-            });
-
-            if self.sequence >= self.iterations {
-                debug!("completed {} iterations", self.sequence);
-                break;
-            }
-        }
-    }
-}
-
 struct Interrogate {
     sequence: usize,
     prev_payoff: Payoff,
@@ -162,19 +113,43 @@ fn main() {
             strategy: Box::new(Action::COOPERATE),
         }
         .start();
-        let _interrogator_addr = Interrogator {
-            iterations: ITERATIONS,
-            sequence: 0,
-            blue_addr,
-            blue_payoff: Payoff::NULL,
-            blue_amount: 0,
-            red_addr,
-            red_payoff: Payoff::NULL,
-            red_amount: 0,
-        }
-        .start();
 
-        debug!("Hello, world!");
+        let mut sequence = 0;
+        let blue_payoff = Payoff::NULL;
+        let blue_amount = 0;
+        let red_payoff = Payoff::NULL;
+        let red_amount = 0;
+        
+        loop {
+            let blue_result  = blue_addr.send(Interrogate {
+                sequence,
+                prev_payoff: blue_payoff,
+                prev_amount: blue_amount,
+            }).await;
+
+            let red_result = red_addr.send(Interrogate {
+                sequence,
+                prev_payoff: red_payoff,
+                prev_amount: red_amount,
+            }).await;
+
+            match red_result {
+                Ok(action) => debug!("red action = {}", action),
+                Err(err) => debug!("red error = {}", err),
+            };
+
+            match blue_result {
+                Ok(action) => debug!("blue action = {}", action),
+                Err(err) => debug!("blue error = {}", err),
+            };
+
+            sequence += 1;
+            if sequence >= ITERATIONS {
+                debug!("completed {} iterations", sequence);
+                break;
+            }
+        };
+
     };
     Arbiter::spawn(execution);
 
